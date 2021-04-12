@@ -1,5 +1,7 @@
 # ExDav
 
+Warning: work in progress! currently only working with read-only shares.
+
 **TODO: Add description**
 
 ## Installation
