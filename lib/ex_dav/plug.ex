@@ -210,7 +210,10 @@ defmodule ExDav.Plug do
   # request handlers
 
   defp get_prefix(conn) do
-    "/" <> Enum.join(conn.script_name, "/")
+    case Enum.join(conn.script_name, "/") do
+      "" -> ""
+      path -> "/#{path}"
+    end
   end
 
   defp get_propstat(%ExDav.DavResource{} = resource, opts \\ []) do
