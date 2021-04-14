@@ -1,0 +1,11 @@
+image: hexpm/elixir:1.11.4-erlang-23.2-alpine-3.13.1
+
+before_script:
+  - mix local.rebar --force
+  - mix local.hex --force
+  - mix deps.get
+
+mix:
+  script:
+    - mix test --cover
+  coverage: '/(\d+\.\d+%) \| Total/'
