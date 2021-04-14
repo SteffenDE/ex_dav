@@ -1,8 +1,8 @@
 defmodule ExDav.XMLHelpers do
   import Saxy.XML
 
-  def href(link) do
-    element("href", [], link)
+  def href(link) when is_binary(link) do
+    element("href", [], [link])
   end
 
   defp get_props_from_resource(props, values) do
@@ -37,7 +37,7 @@ defmodule ExDav.XMLHelpers do
     )
   end
 
-  def prop(%ExDav.DavResource{props: props}, opts \\ []) do
+  def prop(%ExDav.DavResource{props: props}, opts \\ []) when is_list(opts) do
     values = Keyword.get(opts, :values, true)
     requested_props = Keyword.get(opts, :props, :all)
 
@@ -64,15 +64,15 @@ defmodule ExDav.XMLHelpers do
     end)
   end
 
-  def propstat(props, status \\ "HTTP/1.1 200 OK") do
-    element("propstat", [], [element("status", [], status) | [props]])
+  def propstat(props, status \\ "HTTP/1.1 200 OK") when is_binary(status) do
+    element("propstat", [], [element("status", [], [status]) | [props]])
   end
 
-  def response(elements, attrs \\ []) do
+  def response(elements, attrs \\ []) when is_list(attrs) do
     element("response", attrs, elements)
   end
 
-  def multistatus(responses, attrs \\ [{"xmlns", "DAV:"}]) do
+  def multistatus(responses, attrs \\ [{"xmlns", "DAV:"}]) when is_list(attrs) do
     element("multistatus", attrs, responses)
   end
 end

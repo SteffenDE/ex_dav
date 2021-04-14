@@ -12,7 +12,8 @@ defmodule ExDav.Plug do
 
   import ExDav.XMLHelpers
 
-  @chunker Application.compile_env(:ex_dav, [:http_server, :chunker], ExDav.HTTPChunker)
+  # set for testing @ test/support/mocks.ex
+  @chunker Application.get_env(:ex_dav, :chunker, ExDav.HTTPChunker)
 
   plug(Plug.Logger)
   plug(:assign_handler, builder_opts())
