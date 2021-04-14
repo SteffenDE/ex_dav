@@ -1,5 +1,8 @@
 # ExDav
 
+[![Build Status](https://gitlab.com/steffend/ex_dav/badges/main/pipeline.svg)](https://gitlab.com/steffend/ex_dav/)
+[![Coverage](https://gitlab.com/steffend/ex_dav/badges/main/coverage.svg)](https://gitlab.com/steffend/ex_dav/)
+
 **Warning:** work in progress! currently only working with read-only shares.
 
 ExDav is a library that implements an extendable [WebDAV](https://tools.ietf.org/html/rfc4918) server in Elixir using Plug.
