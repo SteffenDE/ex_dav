@@ -209,6 +209,10 @@ defmodule ExDav.Plug do
 
   # request handlers
 
+  defp get_prefix(conn) do
+    "/" <> Enum.join(conn.script_name, "/")
+  end
+
   defp get_propstat(%ExDav.DavResource{} = resource, opts \\ []) do
     prop(resource, opts)
     |> Enum.map(fn {props, status} -> propstat(props, status) end)
@@ -218,13 +222,13 @@ defmodule ExDav.Plug do
     responses =
       cond do
         is_nil(dav_resource.children) or depth == 0 ->
-          [response([href(dav_resource.href) | get_propstat(dav_resource)])]
+          [response([href(get_prefix(conn) <> dav_resource.href) | get_propstat(dav_resource)])]
 
         true ->
           [
-            response([href(dav_resource.href) | get_propstat(dav_resource)])
+            response([href(get_prefix(conn) <> dav_resource.href) | get_propstat(dav_resource)])
             | Enum.map(dav_resource.children, fn child ->
-                response([href(child.href) | get_propstat(child)])
+                response([href(get_prefix(conn) <> child.href) | get_propstat(child)])
               end)
           ]
       end
@@ -238,13 +242,23 @@ defmodule ExDav.Plug do
     responses =
       cond do
         is_nil(dav_resource.children) or depth == 0 ->
-          [response([href(dav_resource.href) | get_propstat(dav_resource, values: false)])]
+          [
+            response([
+              href(get_prefix(conn) <> dav_resource.href)
+              | get_propstat(dav_resource, values: false)
+            ])
+          ]
 
         true ->
           [
-            response([href(dav_resource.href) | get_propstat(dav_resource, values: false)])
+            response([
+              href(get_prefix(conn) <> dav_resource.href)
+              | get_propstat(dav_resource, values: false)
+            ])
             | Enum.map(dav_resource.children, fn child ->
-                response([href(child.href) | get_propstat(child, values: false)])
+                response([
+                  href(get_prefix(conn) <> child.href) | get_propstat(child, values: false)
+                ])
               end)
           ]
       end
@@ -258,13 +272,23 @@ defmodule ExDav.Plug do
     responses =
       cond do
         is_nil(dav_resource.children) or depth == 0 ->
-          [response([href(dav_resource.href) | get_propstat(dav_resource, props: props)])]
+          [
+            response([
+              href(get_prefix(conn) <> dav_resource.href)
+              | get_propstat(dav_resource, props: props)
+            ])
+          ]
 
         true ->
           [
-            response([href(dav_resource.href) | get_propstat(dav_resource, props: props)])
+            response([
+              href(get_prefix(conn) <> dav_resource.href)
+              | get_propstat(dav_resource, props: props)
+            ])
             | Enum.map(dav_resource.children, fn child ->
-                response([href(child.href) | get_propstat(child, props: props)])
+                response([
+                  href(get_prefix(conn) <> child.href) | get_propstat(child, props: props)
+                ])
               end)
           ]
       end

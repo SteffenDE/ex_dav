@@ -6,7 +6,9 @@ defmodule ExDav.DavProvider do
   @type ref :: any()
 
   @doc """
-  The main function that is called for any incoming request. Used to resolve the
+  The main function that is called for any incoming request. Used to resolve the WebDAV resource.
+
+  Returns an opaque identifier that is passed to the other callbacks.
   """
   @callback resolve(conn :: Plug.Conn.t(), opts :: list()) :: ref()
 
