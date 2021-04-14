@@ -5,8 +5,8 @@ defmodule ExDav.HTTPChunker do
   end
 end
 
-defmodule ExDav.HTTPServer do
-  use Plug.Router
+defmodule ExDav.Plug do
+  use Plug.Builder
 
   require Logger
 
@@ -15,19 +15,25 @@ defmodule ExDav.HTTPServer do
   @chunker Application.compile_env(:ex_dav, [:http_server, :chunker], ExDav.HTTPChunker)
 
   plug(Plug.Logger)
+  plug(:assign_handler, builder_opts())
   plug(:check_readonly)
   plug(:assign_depth)
   plug(:disallow_infinity)
-  plug(ExDav.AuthPlug)
-  plug(:match)
+  plug(:authenticate)
   plug(:dispatch)
 
-  def dav_provider() do
-    Application.get_env(:ex_dav, :dav_provider, ExDav.FileSystemProvider)
-  end
+  def assign_handler(conn, opts) do
+    dav_provider = Keyword.get(opts, :dav_provider, ExDav.FileSystemProvider)
+    dav_provider_opts = Keyword.get(opts, :dav_provider_opts, [])
+    lock_manager = Keyword.get(opts, :lock_manager)
+    lock_manager_opts = Keyword.get(opts, :lock_manager_opts, [])
+    dc = Keyword.get(opts, :domain_controller, ExDav.SimpleDC)
+    dc_opts = Keyword.get(opts, :domain_controller_opts, [])
 
-  def lock_manager() do
-    Application.get_env(:ex_dav, :lock_manager)
+    conn
+    |> assign(:dav_provider, {dav_provider, dav_provider_opts})
+    |> assign(:lock_manager, {lock_manager, lock_manager_opts})
+    |> assign(:domain_controller, {dc, dc_opts})
   end
 
   # read only?
@@ -53,8 +59,8 @@ defmodule ExDav.HTTPServer do
 
   defp send_forbidden_if_write(conn, true), do: conn
 
-  defp check_readonly(conn, _opts) do
-    send_forbidden_if_write(conn, dav_provider().read_only())
+  defp check_readonly(conn = %{assigns: %{dav_provider: {dav_provider, _}}}, _opts) do
+    send_forbidden_if_write(conn, dav_provider.read_only())
   end
 
   # depth
@@ -77,6 +83,7 @@ defmodule ExDav.HTTPServer do
         conn
         |> put_status(400)
         |> send_resp(400, "Depth Header must be one of 0, 1, infinity")
+        |> halt()
     end
   end
 
@@ -95,17 +102,22 @@ defmodule ExDav.HTTPServer do
 
   defp disallow_infinity(conn, _opts), do: conn
 
+  # call auth
+  defp authenticate(conn = %{assigns: %{domain_controller: {dc, _}}}, _opts) do
+    ExDav.AuthHelpers.authenticate(conn, dc)
+  end
+
   # sending files
 
-  defp maybe_set_range_response(conn, resource, true) do
-    content_length = ExDav.Resource.get_content_length(resource)
+  defp maybe_set_range_response(conn, provider, resource, true) do
+    content_length = provider.get_content_length(resource)
 
     {conn, 200, content_length, 0, content_length - 1}
   end
 
-  defp maybe_set_range_response(conn, resource, false) do
+  defp maybe_set_range_response(conn, provider, resource, false) do
     is_range_request = not Enum.empty?(get_req_header(conn, "range"))
-    file_length = ExDav.Resource.get_content_length(resource)
+    file_length = provider.get_content_length(resource)
 
     [range_start, range_end] =
       if is_range_request do
@@ -135,22 +147,22 @@ defmodule ExDav.HTTPServer do
     {conn, if(is_range_request, do: 206, else: 200), content_length, range_start, range_end}
   end
 
-  defp send_resource(conn, resource, opts \\ []) do
+  defp send_resource(conn = %{assigns: %{dav_provider: {dav_provider, _}}}, resource, opts \\ []) do
     head = Keyword.get(opts, :head, false)
     is_range_request = not Enum.empty?(get_req_header(conn, "range"))
-    supports_ranges = dav_provider().supports_ranges()
-    supports_streaming = dav_provider().supports_streaming()
-    supports_content_length = dav_provider().supports_content_length()
-    content_length = ExDav.Resource.get_content_length(resource)
-    content_type = ExDav.Resource.get_content_type(resource)
-    display_name = ExDav.Resource.get_display_name(resource)
+    supports_ranges = dav_provider.supports_ranges(resource)
+    supports_streaming = dav_provider.supports_streaming(resource)
+    supports_content_length = dav_provider.supports_content_length(resource)
+    content_length = dav_provider.get_content_length(resource)
+    content_type = dav_provider.get_content_type(resource)
+    display_name = dav_provider.get_display_name(resource)
 
     ignore_ranges =
       not is_range_request or not supports_ranges or not supports_content_length or
         content_length == 0
 
     {conn, code, content_length, range_start, range_end} =
-      maybe_set_range_response(conn, resource, ignore_ranges)
+      maybe_set_range_response(conn, dav_provider, resource, ignore_ranges)
 
     conn =
       conn
@@ -167,7 +179,7 @@ defmodule ExDav.HTTPServer do
 
       true ->
         if supports_streaming do
-          ExDav.Resource.get_stream(resource, range: {range_start, range_end})
+          dav_provider.get_stream(resource, range: {range_start, range_end})
           |> Enum.reduce_while(conn, fn chunk, conn ->
             case @chunker.chunk_to_conn(conn, chunk) do
               {:ok, conn} ->
@@ -186,7 +198,7 @@ defmodule ExDav.HTTPServer do
           {:ok, conn} =
             @chunker.chunk_to_conn(
               conn,
-              ExDav.Resource.get_content(resource, range: {range_start, range_end})
+              dav_provider.get_content(resource, range: {range_start, range_end})
             )
 
           conn
@@ -261,15 +273,15 @@ defmodule ExDav.HTTPServer do
     ExDav.DavView.render_tree(conn, tree)
   end
 
-  def handle_propfind(conn) do
-    resource = dav_provider().resolve(conn)
+  def handle_propfind(conn = %{assigns: %{dav_provider: {dav_provider, opts}}}) do
+    resource = dav_provider.resolve(conn, opts)
 
     case resource do
       nil ->
         send_resp(conn, 404, "Not found")
 
       _resource ->
-        dav_resource = ExDav.Resource.to_dav_struct(resource)
+        dav_resource = dav_provider.to_dav_struct(resource)
         {:ok, body, conn} = Plug.Conn.read_body(conn, [])
 
         # IO.inspect(body)
@@ -355,8 +367,10 @@ defmodule ExDav.HTTPServer do
     |> send_resp(200, "")
   end
 
-  def handle_options(conn) do
-    resource = dav_provider().resolve(conn)
+  def handle_options(
+        conn = %{assigns: %{dav_provider: {dav_provider, opts}, lock_manager: {lock_manager, _}}}
+      ) do
+    resource = dav_provider.resolve(conn, opts)
 
     case resource do
       nil ->
@@ -365,8 +379,8 @@ defmodule ExDav.HTTPServer do
       _resource ->
         allow =
           ["GET", "HEAD", "PROPFIND"]
-          |> (&if(lock_manager(), do: ["LOCK", "UNLOCK" | &1], else: &1)).()
-          |> (&if(not dav_provider().read_only(),
+          |> (&if(lock_manager, do: ["LOCK", "UNLOCK" | &1], else: &1)).()
+          |> (&if(not dav_provider.read_only(),
                 do: ["PUT", "DELETE", "COPY", "MOVE", "PROPPATCH" | &1],
                 else: &1
               )).()
@@ -381,8 +395,8 @@ defmodule ExDav.HTTPServer do
     end
   end
 
-  def handle_get(conn) do
-    resource = dav_provider().resolve(conn)
+  def handle_get(conn = %{assigns: %{dav_provider: {dav_provider, opts}}}) do
+    resource = dav_provider.resolve(conn, opts)
 
     case resource do
       nil -> send_resp(conn, 404, "Not found")
@@ -390,8 +404,8 @@ defmodule ExDav.HTTPServer do
     end
   end
 
-  def handle_head(conn) do
-    resource = dav_provider().resolve(conn)
+  def handle_head(conn = %{assigns: %{dav_provider: {dav_provider, opts}}}) do
+    resource = dav_provider.resolve(conn, opts)
 
     case resource do
       nil -> send_resp(conn, 404, "Not found")
@@ -399,57 +413,21 @@ defmodule ExDav.HTTPServer do
     end
   end
 
-  # router matches
-
-  match _, via: :propfind do
-    handle_propfind(conn)
-  end
-
-  match _, via: :proppatch do
-    handle_proppatch(conn)
-  end
-
-  match _, via: :mkcol do
-    handle_mkcol(conn)
-  end
-
-  match _, via: :post do
-    handle_post(conn)
-  end
-
-  match _, via: :delete do
-    handle_delete(conn)
-  end
-
-  match _, via: :put do
-    handle_put(conn)
-  end
-
-  match _, via: :copy do
-    handle_copy(conn)
-  end
-
-  match _, via: :move do
-    handle_move(conn)
-  end
-
-  match _, via: :lock do
-    handle_lock(conn)
-  end
-
-  match _, via: :unlock do
-    handle_unlock(conn)
-  end
-
-  match _, via: :options do
-    handle_options(conn)
-  end
-
-  match _, via: :get do
-    handle_get(conn)
-  end
-
-  match _, via: :head do
-    handle_head(conn)
+  def dispatch(conn = %Plug.Conn{}, _opts) do
+    case conn.method do
+      "PROPFIND" -> handle_propfind(conn)
+      "PROPPATCH" -> handle_proppatch(conn)
+      "MKCOL" -> handle_mkcol(conn)
+      "POST" -> handle_post(conn)
+      "DELETE" -> handle_delete(conn)
+      "PUT" -> handle_put(conn)
+      "COPY" -> handle_copy(conn)
+      "MOVE" -> handle_move(conn)
+      "LOCK" -> handle_lock(conn)
+      "UNLOCK" -> handle_unlock(conn)
+      "OPTIONS" -> handle_options(conn)
+      "HEAD" -> handle_head(conn)
+      "GET" -> handle_get(conn)
+    end
   end
 end

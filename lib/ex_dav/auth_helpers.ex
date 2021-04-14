@@ -1,9 +1,5 @@
-defmodule ExDav.AuthPlug do
+defmodule ExDav.AuthHelpers do
   import Plug.Conn
-
-  def domain_controller() do
-    Application.get_env(:ex_dav, :domain_controller, ExDav.SimpleDC)
-  end
 
   defp verify_auth(conn, dc) do
     if dc.require_authentication(conn, conn.assigns.realm) do
@@ -42,9 +38,7 @@ defmodule ExDav.AuthPlug do
     end
   end
 
-  def authenticate(conn) do
-    dc = domain_controller()
-
+  def do_auth(conn, dc) do
     if is_nil(dc) do
       conn
     else
@@ -54,11 +48,9 @@ defmodule ExDav.AuthPlug do
 
   # Plug
 
-  def init(_), do: []
-
-  def call(conn, _opts) do
+  def authenticate(conn, dc) do
     conn
-    |> assign(:realm, domain_controller().domain_realm(conn))
-    |> authenticate()
+    |> assign(:realm, dc.domain_realm(conn))
+    |> do_auth(dc)
   end
 end

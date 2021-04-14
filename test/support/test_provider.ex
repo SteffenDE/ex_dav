@@ -5,29 +5,6 @@ defmodule ExDav.TestFile do
             contenttype: "text/plain"
 end
 
-defimpl ExDav.Resource, for: ExDav.TestFile do
-  def to_dav_struct(ref),
-    do: %ExDav.DavResource{
-      href: ref.path,
-      props: %{
-        displayname: ref.name,
-        getcontentlength: ref.contentlength,
-        getcontenttype: ref.contenttype
-      },
-      children: []
-    }
-
-  def get_content_length(ref), do: ref.contentlength
-
-  def get_content_type(ref), do: ref.contenttype
-
-  def get_display_name(ref), do: ref.name
-
-  def get_content(ref, _opts), do: String.duplicate("A", ref.contentlength)
-
-  def get_stream(_ref, _opts), do: raise("not implemented")
-end
-
 defmodule ExDav.TestProvider do
   use ExDav.DavProvider
 
@@ -35,14 +12,40 @@ defmodule ExDav.TestProvider do
   def read_only(), do: true
 
   @impl true
-  def resolve(conn) do
+  def resolve(conn, _opts) do
     case conn.path_info do
       ["my", "existing", "file"] -> %ExDav.TestFile{}
       _ -> nil
     end
   end
 
-  def supports_ranges(), do: false
-  def supports_streaming(), do: false
-  def supports_content_length(), do: false
+  @impl true
+  def get_creation_date(_ref), do: NaiveDateTime.utc_now()
+
+  @impl true
+  def get_last_modified(_ref), do: NaiveDateTime.utc_now()
+
+  @impl true
+  def get_members(_ref), do: []
+
+  @impl true
+  def get_preferred_path(ref), do: ref.path
+
+  @impl true
+  def is_collection(_ref), do: false
+
+  @impl true
+  def get_content_length(ref), do: ref.contentlength
+
+  @impl true
+  def get_content_type(ref), do: ref.contenttype
+
+  @impl true
+  def get_display_name(ref), do: ref.name
+
+  @impl true
+  def get_content(ref, _opts), do: String.duplicate("A", ref.contentlength)
+
+  @impl true
+  def get_stream(_ref, _opts), do: raise("not implemented")
 end

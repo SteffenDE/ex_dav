@@ -1,6 +1,6 @@
-defmodule ExDav do
+defmodule ExDavDemo do
   @moduledoc """
-  Documentation for `ExDav`.
+  Documentation for `ExDavDemo`.
   """
 
   @doc """
@@ -8,7 +8,7 @@ defmodule ExDav do
 
   ## Examples
 
-      iex> ExDav.hello()
+      iex> ExDavDemo.hello()
       :world
 
   """
