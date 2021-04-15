@@ -15,11 +15,11 @@ defmodule ExDav.Plug do
   # set for testing @ test/support/mocks.ex
   @chunker Application.get_env(:ex_dav, :chunker, ExDav.HTTPChunker)
 
-  plug(Plug.Logger)
   plug(:assign_handler, builder_opts())
   plug(:check_readonly)
   plug(:assign_depth)
   plug(:disallow_infinity)
+  plug(:tame_macos)
   plug(:authenticate)
   plug(:dispatch)
 
@@ -103,6 +103,24 @@ defmodule ExDav.Plug do
 
   defp disallow_infinity(conn, _opts), do: conn
 
+  # tame mac os finder requests
+  # see: https://gist.github.com/jens1101/9f3faa6c2dae23537257f1c3d0afdfdf
+  defp tame_macos(conn, _opts) do
+    cond do
+      conn.request_path =~ ~r/\.(_.*|DS_Store|Spotlight-V100|TemporaryItems|Trashes|hidden)$/ ->
+        case conn.method do
+          "PUT" -> send_resp(conn, 403, "Forbidden") |> halt()
+          _ -> send_resp(conn, 404, "Not Found") |> halt()
+        end
+
+      conn.request_path =~ ~r/\.metadata_never_index$/ ->
+        send_resp(conn, 200, "") |> halt()
+
+      true ->
+        conn
+    end
+  end
+
   # call auth
   defp authenticate(conn = %{assigns: %{domain_controller: {dc, _}}}, _opts) do
     ExDav.AuthHelpers.authenticate(conn, dc)
@@ -148,7 +166,7 @@ defmodule ExDav.Plug do
     {conn, if(is_range_request, do: 206, else: 200), content_length, range_start, range_end}
   end
 
-  defp send_resource(conn = %{assigns: %{dav_provider: {dav_provider, _}}}, resource, opts \\ []) do
+  defp send_resource(conn = %{assigns: %{dav_provider: {dav_provider, _}}}, resource, opts) do
     head = Keyword.get(opts, :head, false)
     is_range_request = not Enum.empty?(get_req_header(conn, "range"))
     supports_ranges = dav_provider.supports_ranges(resource)
@@ -423,21 +441,19 @@ defmodule ExDav.Plug do
     end
   end
 
-  def handle_get(conn = %{assigns: %{dav_provider: {dav_provider, opts}}}) do
+  def handle_get(conn = %{assigns: %{dav_provider: {dav_provider, opts}}}, get_opts \\ []) do
     resource = dav_provider.resolve(conn, opts)
+    is_head = Keyword.get(get_opts, :head, false)
 
-    case resource do
-      nil -> send_resp(conn, 404, "Not found")
-      resource -> send_resource(conn, resource)
-    end
-  end
+    cond do
+      is_nil(resource) ->
+        send_resp(conn, 404, "Not found")
 
-  def handle_head(conn = %{assigns: %{dav_provider: {dav_provider, opts}}}) do
-    resource = dav_provider.resolve(conn, opts)
+      dav_provider.is_collection(resource) ->
+        send_resp(conn, 501, "Getting collections is not implemented!")
 
-    case resource do
-      nil -> send_resp(conn, 404, "Not found")
-      resource -> send_resource(conn, resource, head: true)
+      true ->
+        send_resource(conn, resource, head: is_head)
     end
   end
 
@@ -454,8 +470,8 @@ defmodule ExDav.Plug do
       "LOCK" -> handle_lock(conn)
       "UNLOCK" -> handle_unlock(conn)
       "OPTIONS" -> handle_options(conn)
-      "HEAD" -> handle_head(conn)
-      "GET" -> handle_get(conn)
+      "HEAD" -> handle_get(conn, head: true)
+      "GET" -> handle_get(conn, [])
     end
   end
 end

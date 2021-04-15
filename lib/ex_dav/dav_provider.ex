@@ -187,7 +187,7 @@ defmodule ExDav.DavProvider do
           creationdate:
             unquote(module).get_creation_date(ref)
             |> Calendar.strftime("%a, %d %b %Y %H:%M:%S GMT"),
-          displayname: unquote(module).get_display_name(ref),
+          displayname: "<![CDATA[#{unquote(module).get_display_name(ref)}]]>",
           getcontentlength: unquote(module).get_content_length(ref),
           getcontenttype: unquote(module).get_content_type(ref),
           getetag: unquote(module).get_etag(ref),

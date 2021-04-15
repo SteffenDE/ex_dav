@@ -5,7 +5,9 @@ defmodule ExDav.FileSystemProvider do
 
   @impl true
   def resolve(conn, opts \\ []) when is_list(opts) do
-    root = Keyword.get(opts, :root, File.cwd!())
+    root =
+      Keyword.get(opts, :root, File.cwd!())
+      |> String.replace(~r(/+$), "")
 
     conn.path_info
     |> Enum.join("/")
@@ -75,8 +77,7 @@ defmodule ExDav.FileSystemProvider.File do
         stat: stat
       }
     else
-      other ->
-        IO.inspect(other)
+      _other ->
         nil
     end
   end

@@ -2,7 +2,7 @@ defmodule ExDav.XMLHelpers do
   import Saxy.XML
 
   def href(link) when is_binary(link) do
-    element("href", [], [link])
+    element("href", [], ["<![CDATA[#{link}]]>"])
   end
 
   defp get_props_from_resource(props, values) do
