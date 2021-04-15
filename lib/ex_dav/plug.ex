@@ -123,7 +123,26 @@ defmodule ExDav.Plug do
 
   # call auth
   defp authenticate(conn = %{assigns: %{domain_controller: {dc, _}}}, _opts) do
-    ExDav.AuthHelpers.authenticate(conn, dc)
+    with true <- not is_nil(dc),
+         realm <- dc.domain_realm(conn),
+         true <- dc.require_authentication(conn, realm),
+         {user, pass} <-
+           Plug.BasicAuth.parse_basic_auth(conn) do
+      if dc.verify(conn, user, pass) do
+        conn
+        |> assign(:dav_username, user)
+        |> assign(:realm, realm)
+      else
+        conn
+        |> send_resp(403, "Unauthorized")
+        |> halt()
+      end
+    else
+      false -> conn
+      _ ->
+        realm = (dc && dc.domain_realm(conn))
+        Plug.BasicAuth.request_basic_auth(conn, realm: realm) |> halt()
+    end
   end
 
   # sending files
