@@ -10,16 +10,7 @@ defmodule ExDavDemo.Application do
     children = [
       # Starts a worker by calling: ExDavDemo.Worker.start_link(arg)
       # {ExDavDemo.Worker, arg}
-      {Plug.Cowboy,
-       scheme: :http,
-       plug:
-         {ExDav.Plug,
-          [
-            dav_provider: ExDav.FileSystemProvider,
-            dav_provider_opts: [root: "/"],
-            domain_controller: ExDav.SimpleDC
-          ]},
-       port: 5000}
+      {Plug.Cowboy, scheme: :http, plug: ExDavDemo.WebDAVServer, port: 5000}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

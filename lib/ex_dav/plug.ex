@@ -20,7 +20,6 @@ defmodule ExDav.Plug do
   plug(:assign_depth)
   plug(:disallow_infinity)
   plug(:tame_macos)
-  plug(:authenticate)
   plug(:dispatch)
 
   def assign_handler(conn, opts) do
@@ -28,13 +27,10 @@ defmodule ExDav.Plug do
     dav_provider_opts = Keyword.get(opts, :dav_provider_opts, [])
     lock_manager = Keyword.get(opts, :lock_manager)
     lock_manager_opts = Keyword.get(opts, :lock_manager_opts, [])
-    dc = Keyword.get(opts, :domain_controller, ExDav.SimpleDC)
-    dc_opts = Keyword.get(opts, :domain_controller_opts, [])
 
     conn
     |> assign(:dav_provider, {dav_provider, dav_provider_opts})
     |> assign(:lock_manager, {lock_manager, lock_manager_opts})
-    |> assign(:domain_controller, {dc, dc_opts})
   end
 
   # read only?
@@ -118,30 +114,6 @@ defmodule ExDav.Plug do
 
       true ->
         conn
-    end
-  end
-
-  # call auth
-  defp authenticate(conn = %{assigns: %{domain_controller: {dc, _}}}, _opts) do
-    with true <- not is_nil(dc),
-         realm <- dc.domain_realm(conn),
-         true <- dc.require_authentication(conn, realm),
-         {user, pass} <-
-           Plug.BasicAuth.parse_basic_auth(conn) do
-      if dc.verify(conn, user, pass) do
-        conn
-        |> assign(:dav_username, user)
-        |> assign(:realm, realm)
-      else
-        conn
-        |> send_resp(403, "Unauthorized")
-        |> halt()
-      end
-    else
-      false -> conn
-      _ ->
-        realm = (dc && dc.domain_realm(conn))
-        Plug.BasicAuth.request_basic_auth(conn, realm: realm) |> halt()
     end
   end
 

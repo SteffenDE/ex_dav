@@ -4,10 +4,7 @@ defmodule ExDav.PlugTest do
 
   import Mox
 
-  @opts [
-    dav_provider: ExDav.TestProvider,
-    domain_controller: ExDav.AnonymousDC
-  ]
+  @opts [dav_provider: ExDav.TestProvider]
 
   setup do
     ExDav.HTTPChunkerMock
