@@ -10,7 +10,15 @@ defmodule ExDav.DavProvider do
 
   Returns an opaque identifier that is passed to the other callbacks.
   """
-  @callback resolve(conn :: Plug.Conn.t(), opts :: list()) :: ref()
+  @callback resolve(path :: String.t(), opts :: list()) :: ref()
+
+  @doc """
+  The function checks if a resource exists for the given path.
+
+  By default calls resolve and checks if the return values is not nil.
+  Should be replaced by a more efficient implementation.
+  """
+  @callback exists(path :: String.t(), opts :: list()) :: boolean()
 
   @doc """
   Used to format the resource into the `ExDav.DavResource` struct.
@@ -138,11 +146,23 @@ defmodule ExDav.DavProvider do
   """
   @callback get_stream(ref(), opts :: Keyword.t()) :: Enumerable.t()
 
+  @doc """
+  Create a new collection as member of the specified `ref()`.
+
+  We make sure that the `ref()` is an existing collection.
+
+  Providers MUST implement this callback if `read_only/0` is `false`.
+  """
+  @callback create_collection(ref(), name :: String.t()) :: :ok | {:error, any()}
+
   defmacro __using__(_) do
     module = __CALLER__.module
 
     quote do
       @behaviour ExDav.DavProvider
+
+      @impl true
+      def exists(path, opts), do: not is_nil(resolve(path, opts))
 
       @impl true
       def read_only, do: true
@@ -223,6 +243,9 @@ defmodule ExDav.DavProvider do
       def to_dav_struct(ref) do
         map_ref(ref, 0)
       end
+
+      @impl true
+      def create_collection(_ref, _name), do: {:error, :not_implemented}
 
       defoverridable ExDav.DavProvider
     end

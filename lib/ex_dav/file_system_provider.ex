@@ -4,15 +4,15 @@ defmodule ExDav.FileSystemProvider do
   alias ExDav.FileSystemProvider.File, as: DavFile
 
   @impl true
-  def resolve(conn, opts \\ []) when is_list(opts) do
+  def read_only(), do: false
+
+  @impl true
+  def resolve(path, opts \\ []) when is_list(opts) do
     root =
       Keyword.get(opts, :root, File.cwd!())
-      |> String.replace(~r(/+$), "")
+      |> String.replace_trailing("/", "")
 
-    conn.path_info
-    |> Enum.join("/")
-    |> URI.decode()
-    |> DavFile.resolve(root)
+    DavFile.resolve(path, root)
   end
 
   @impl true
@@ -59,6 +59,9 @@ defmodule ExDav.FileSystemProvider do
 
   @impl true
   def get_stream(ref, opts), do: DavFile.get_stream(ref, opts)
+
+  @impl true
+  def create_collection(ref, name), do: DavFile.create_collection(ref, name)
 end
 
 defmodule ExDav.FileSystemProvider.File do
@@ -174,6 +177,10 @@ defmodule ExDav.FileSystemProvider.File do
         size = range_end - range_start + 1
         ExDav.FileSystemProvider.IOHelpers.stream!(path, range_start, size)
     end
+  end
+
+  def create_collection(%DavFile{fs_path: path}, name) do
+    File.mkdir("#{path}/#{name}")
   end
 end
 
