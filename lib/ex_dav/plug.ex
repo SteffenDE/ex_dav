@@ -387,7 +387,7 @@ defmodule ExDav.Plug do
   def handle_mkcol(
         conn = %{assigns: %{dav_path: path, dav_name: name, dav_provider: {dav_provider, opts}}}
       ) do
-    parent_path = get_parent(conn) |> IO.inspect(label: "parent path")
+    parent_path = get_parent(conn)
 
     cond do
       dav_provider.read_only() ->
@@ -418,12 +418,145 @@ defmodule ExDav.Plug do
     send_resp(conn, 400, "")
   end
 
-  def handle_delete(conn) do
-    send_resp(conn, 400, "")
+  def handle_delete(
+        conn = %{assigns: %{dav_path: path, dav_provider: {dav_provider, opts}, depth: depth}}
+      ) do
+    resource = dav_provider.resolve(path, opts)
+
+    cond do
+      dav_provider.read_only() ->
+        send_resp(conn, 403, "This server does not support write requests.")
+
+      content_length(conn) != 0 ->
+        send_resp(conn, 415, "This server does not process DELETE requests with a request body.")
+
+      is_nil(resource) ->
+        send_resp(conn, 404, "Not found.")
+
+      dav_provider.is_collection(resource) and depth != :infinity ->
+        send_resp(conn, 400, "Only Depth: infinity is supported for collections.")
+
+      dav_provider.supports_recursive_delete() ->
+        with :ok <- dav_provider.delete(resource) do
+          send_resp(conn, 204, "")
+        else
+          # TODO: provide the correct error list
+          _other -> send_resp(conn, 400, "Delete request failed.")
+        end
+
+      true ->
+        # TODO: get list of descendents and delete all of them
+        send_resp(conn, 501, "Not implemented...")
+    end
   end
 
-  def handle_put(conn) do
-    send_resp(conn, 400, "")
+  defp stream_body(conn, dav_provider, resource) do
+    stream =
+      Stream.resource(
+        fn -> {conn, :reading} end,
+        fn
+          {conn, :reading} ->
+            case Plug.Conn.read_body(conn, length: 8 * 1000) do
+              {:ok, body, conn} -> {[body], {conn, :done}}
+              {:more, chunk, conn} -> {[chunk], {conn, :reading}}
+              {:error, reason} -> {:halt, {conn, reason}}
+            end
+
+          {conn, :done} ->
+            {:halt, {conn, :done}}
+        end,
+        fn
+          {conn, :done} ->
+            send(self(), {:stream_body_done, conn})
+
+          {conn, error_reason} ->
+            send(self(), {:stream_body_error, {conn, error_reason}})
+
+          other ->
+            send(self(), {:stream_body_error, {conn, other}})
+        end
+      )
+
+    dav_provider.write_stream(resource, stream)
+    # we send the conn when uploading is done (or failed)
+    receive do
+      {:stream_body_done, conn} -> {:ok, conn}
+      {:stream_body_error, result} -> {:error, result}
+    after
+      1_000 -> {:error, :timeout}
+    end
+  end
+
+  defp read_to_void(conn) do
+    case Plug.Conn.read_body(conn) do
+      {:ok, _body, conn} ->
+        {:ok, conn}
+
+      {:more, _chunk, conn} ->
+        read_to_void(conn)
+
+      other ->
+        {:error, {conn, other}}
+    end
+  end
+
+  def handle_put(
+        conn = %{assigns: %{dav_path: path, dav_name: name, dav_provider: {dav_provider, opts}}}
+      ) do
+    is_new = Map.get(conn.assigns, :is_new, false)
+    resource = dav_provider.resolve(path, opts)
+    parent_path = get_parent(conn)
+    parent_resource = dav_provider.resolve(parent_path, opts)
+
+    cond do
+      get_req_header(conn, "content-range") != [] ->
+        send_resp(conn, 400, "Content-range header is not allowed on PUT requests.")
+
+      dav_provider.is_collection(resource) ->
+        send_resp(conn, 405, "Cannot PUT to a collection.")
+
+      not dav_provider.exists(parent_path, opts) or
+          not dav_provider.is_collection(parent_resource) ->
+        send_resp(conn, 409, "The parent resource must be an existing collection.")
+
+      is_nil(resource) ->
+        :ok = dav_provider.create_empty_resource(parent_resource, name)
+        # recurse!
+        conn
+        |> assign(:is_new, true)
+        |> handle_put()
+
+      dav_provider.supports_streaming_uploads(resource) ->
+        with {:ok, conn} <- read_to_void(conn) do
+          send_resp(conn, if(is_new, do: 201, else: 204), "")
+        else
+          other ->
+            IO.inspect(other)
+            send_resp(conn, 500, "woopsie!")
+        end
+
+      # stream the request body
+      # with {:ok, conn} <- stream_body(conn, dav_provider, resource) do
+      #   send_resp(conn, if(is_new, do: 201, else: 204), "")
+      # else
+      #   {:error, {conn, reason}} when is_struct(conn) ->
+      #     IO.inspect(reason, label: "upload error")
+      #     send_resp(conn, 500, "upload error!")
+
+      #   _other ->
+      #     send_resp(conn, 500, "woopsie!")
+      # end
+
+      true ->
+        # read whole body into memory :(
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        with :ok <- dav_provider.write(resource, body) do
+          send_resp(conn, if(is_new, do: 201, else: 204), "")
+        else
+          _other -> send_resp(conn, 500, "woopsie!")
+        end
+    end
   end
 
   def handle_copy(conn) do
