@@ -35,9 +35,8 @@ defmodule ExDav.Plug do
       |> String.replace_trailing("/", "")
 
     dav_name =
-      List.last(conn.path_info) ||
-        ""
-        |> URI.decode()
+      (List.last(conn.path_info) || "")
+      |> URI.decode()
 
     conn
     |> assign(:dav_provider, {dav_provider, dav_provider_opts})
@@ -487,18 +486,18 @@ defmodule ExDav.Plug do
     end
   end
 
-  defp read_to_void(conn) do
-    case Plug.Conn.read_body(conn) do
-      {:ok, _body, conn} ->
-        {:ok, conn}
+  # defp read_to_void(conn) do
+  #   case Plug.Conn.read_body(conn) do
+  #     {:ok, _body, conn} ->
+  #       {:ok, conn}
 
-      {:more, _chunk, conn} ->
-        read_to_void(conn)
+  #     {:more, _chunk, conn} ->
+  #       read_to_void(conn)
 
-      other ->
-        {:error, {conn, other}}
-    end
-  end
+  #     other ->
+  #       {:error, {conn, other}}
+  #   end
+  # end
 
   def handle_put(
         conn = %{assigns: %{dav_path: path, dav_name: name, dav_provider: {dav_provider, opts}}}
@@ -527,25 +526,25 @@ defmodule ExDav.Plug do
         |> handle_put()
 
       dav_provider.supports_streaming_uploads(resource) ->
-        with {:ok, conn} <- read_to_void(conn) do
+        # with {:ok, conn} <- read_to_void(conn) do
+        #   send_resp(conn, if(is_new, do: 201, else: 204), "")
+        # else
+        #   other ->
+        #     IO.inspect(other)
+        #     send_resp(conn, 500, "woopsie!")
+        # end
+
+        # stream the request body
+        with {:ok, conn} <- stream_body(conn, dav_provider, resource) do
           send_resp(conn, if(is_new, do: 201, else: 204), "")
         else
-          other ->
-            IO.inspect(other)
+          {:error, {conn, reason}} when is_struct(conn) ->
+            IO.inspect(reason, label: "upload error")
+            send_resp(conn, 500, "upload error!")
+
+          _other ->
             send_resp(conn, 500, "woopsie!")
         end
-
-      # stream the request body
-      # with {:ok, conn} <- stream_body(conn, dav_provider, resource) do
-      #   send_resp(conn, if(is_new, do: 201, else: 204), "")
-      # else
-      #   {:error, {conn, reason}} when is_struct(conn) ->
-      #     IO.inspect(reason, label: "upload error")
-      #     send_resp(conn, 500, "upload error!")
-
-      #   _other ->
-      #     send_resp(conn, 500, "woopsie!")
-      # end
 
       true ->
         # read whole body into memory :(

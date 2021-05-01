@@ -10,14 +10,7 @@ defmodule ExDav.FileSystemProvider do
   @impl true
   def read_only(), do: false
 
-  @impl true
-  def resolve(path, opts \\ []) when is_list(opts) do
-    root_path =
-      Keyword.get(opts, :root, File.cwd!())
-      |> String.replace_trailing("/", "")
-
-    fs_path = "#{root_path}#{if String.starts_with?(path, "/"), do: path, else: "/" <> path}"
-
+  defp stat!(fs_path, path) do
     with {:ok, stat} <- File.stat(fs_path) do
       %DavFile{
         fs_path: fs_path,
@@ -28,6 +21,29 @@ defmodule ExDav.FileSystemProvider do
     else
       _other ->
         nil
+    end
+  end
+
+  @impl true
+  def resolve(path, opts \\ []) when is_list(opts) do
+    root_path =
+      Keyword.get(opts, :root, File.cwd!())
+      |> String.trim_trailing("/")
+
+    path = String.trim_leading(path, "/")
+
+    # prevent directory traversal attacks
+    # notice: :filelib.safe_relative_path/2 needs Erlang/OTP 22
+    case :filelib.safe_relative_path(path, root_path) do
+      :unsafe ->
+        nil
+
+      [] ->
+        stat!("#{root_path}/", "/")
+
+      path ->
+        "#{root_path}/#{path}"
+        |> stat!(path)
     end
   end
 
