@@ -1,74 +1,16 @@
+defmodule ExDav.FileSystemProvider.File do
+  defstruct [:fs_path, :path, :name, :stat]
+end
+
 defmodule ExDav.FileSystemProvider do
   use ExDav.DavProvider
 
   alias ExDav.FileSystemProvider.File, as: DavFile
 
   @impl true
-  def resolve(conn, opts \\ []) when is_list(opts) do
-    root =
-      Keyword.get(opts, :root, File.cwd!())
-      |> String.replace(~r(/+$), "")
+  def read_only(), do: false
 
-    conn.path_info
-    |> Enum.join("/")
-    |> URI.decode()
-    |> DavFile.resolve(root)
-  end
-
-  @impl true
-  def supports_streaming(_), do: true
-
-  @impl true
-  def supports_ranges(_), do: true
-
-  @impl true
-  def supports_content_length(_), do: true
-
-  @impl true
-  def supports_etag(_), do: true
-
-  @impl true
-  def is_collection(ref), do: DavFile.is_collection(ref)
-
-  @impl true
-  def get_display_name(ref), do: DavFile.get_display_name(ref)
-
-  @impl true
-  def get_members(ref), do: DavFile.get_members(ref)
-
-  @impl true
-  def get_preferred_path(ref), do: DavFile.get_preferred_path(ref)
-
-  @impl true
-  def get_creation_date(ref), do: DavFile.get_creation_date(ref)
-
-  @impl true
-  def get_last_modified(ref), do: DavFile.get_last_modified(ref)
-
-  @impl true
-  def get_content_length(ref), do: DavFile.get_content_length(ref)
-
-  @impl true
-  def get_content_type(ref), do: DavFile.get_content_type(ref)
-
-  @impl true
-  def get_etag(ref), do: DavFile.get_etag(ref)
-
-  @impl true
-  def get_content(ref, opts), do: DavFile.get_content(ref, opts)
-
-  @impl true
-  def get_stream(ref, opts), do: DavFile.get_stream(ref, opts)
-end
-
-defmodule ExDav.FileSystemProvider.File do
-  defstruct [:fs_path, :path, :name, :stat]
-
-  alias ExDav.FileSystemProvider.File, as: DavFile
-
-  def resolve(path, root_path) do
-    fs_path = "#{root_path}#{if String.starts_with?(path, "/"), do: path, else: "/" <> path}"
-
+  defp stat!(fs_path, path) do
     with {:ok, stat} <- File.stat(fs_path) do
       %DavFile{
         fs_path: fs_path,
@@ -82,9 +24,58 @@ defmodule ExDav.FileSystemProvider.File do
     end
   end
 
+  @impl true
+  def resolve(path, opts \\ []) when is_list(opts) do
+    root_path =
+      Keyword.get(opts, :root, File.cwd!())
+      |> String.trim_trailing("/")
+
+    path = String.trim_leading(path, "/")
+
+    # prevent directory traversal attacks
+    # notice: :filelib.safe_relative_path/2 needs Erlang/OTP 22
+    case :filelib.safe_relative_path(path, root_path) do
+      :unsafe ->
+        nil
+
+      [] ->
+        stat!("#{root_path}/", "/")
+
+      path ->
+        "#{root_path}/#{path}"
+        |> stat!(path)
+    end
+  end
+
+  @impl true
+  def supports_streaming(_), do: true
+
+  @impl true
+  def supports_streaming_uploads(_), do: true
+
+  @impl true
+  def supports_ranges(_), do: true
+
+  @impl true
+  def supports_content_length(_), do: true
+
+  @impl true
+  def supports_etag(_), do: true
+
+  @impl true
+  def supports_recursive_move(), do: true
+
+  @impl true
+  def supports_recursive_delete(), do: true
+
+  @impl true
   def is_collection(%DavFile{stat: %{type: :directory}}), do: true
   def is_collection(_), do: false
 
+  @impl true
+  def get_display_name(%DavFile{name: name}), do: name
+
+  @impl true
   def get_members(%DavFile{fs_path: fs_path, path: path, stat: %{type: :directory}}) do
     Enum.map(File.ls!(fs_path), fn member ->
       fs_delimiter = if String.ends_with?(fs_path, "/"), do: "", else: "/"
@@ -108,16 +99,7 @@ defmodule ExDav.FileSystemProvider.File do
     |> Enum.filter(fn i -> not is_nil(i) end)
   end
 
-  def get_display_name(%DavFile{name: name}), do: name
-
-  def get_creation_date(%DavFile{stat: %{ctime: ctime}}) do
-    NaiveDateTime.from_erl!(ctime)
-  end
-
-  def get_last_modified(%DavFile{stat: %{mtime: mtime}}) do
-    NaiveDateTime.from_erl!(mtime)
-  end
-
+  @impl true
   def get_preferred_path(%DavFile{path: ""}), do: "/"
 
   def get_preferred_path(%DavFile{path: path, stat: %{type: type}}) do
@@ -129,8 +111,20 @@ defmodule ExDav.FileSystemProvider.File do
     end
   end
 
+  @impl true
+  def get_creation_date(%DavFile{stat: %{ctime: ctime}}) do
+    NaiveDateTime.from_erl!(ctime)
+  end
+
+  @impl true
+  def get_last_modified(%DavFile{stat: %{mtime: mtime}}) do
+    NaiveDateTime.from_erl!(mtime)
+  end
+
+  @impl true
   def get_content_length(%DavFile{stat: %{size: size}}), do: size
 
+  @impl true
   def get_content_type(%DavFile{stat: %{type: :directory}}) do
     "application/x-directory"
   end
@@ -142,10 +136,12 @@ defmodule ExDav.FileSystemProvider.File do
     |> MIME.type()
   end
 
-  def get_etag(%DavFile{stat: %{mtime: mtime, size: size}}) do
-    "#{:erlang.phash2(mtime)}-#{:erlang.phash2(size)}"
+  @impl true
+  def get_etag(%DavFile{fs_path: path, stat: %{mtime: mtime, size: size}}) do
+    "#{:erlang.phash2(path)}-#{:erlang.phash2(mtime)}-#{:erlang.phash2(size)}"
   end
 
+  @impl true
   def get_content(%DavFile{fs_path: path}, opts) do
     range = Keyword.get(opts, :range)
 
@@ -163,6 +159,7 @@ defmodule ExDav.FileSystemProvider.File do
     end
   end
 
+  @impl true
   def get_stream(%DavFile{fs_path: path}, opts) do
     range = Keyword.get(opts, :range)
 
@@ -175,6 +172,53 @@ defmodule ExDav.FileSystemProvider.File do
         ExDav.FileSystemProvider.IOHelpers.stream!(path, range_start, size)
     end
   end
+
+  @impl true
+  def create_empty_resource(%DavFile{fs_path: path}, name) do
+    File.touch("#{path}/#{name}")
+  end
+
+  @impl true
+  def create_collection(%DavFile{fs_path: path}, name) do
+    File.mkdir("#{path}/#{name}")
+  end
+
+  @impl true
+  def write_stream(%DavFile{fs_path: path}, stream) do
+    output = File.stream!(path, [], 1024 * 1024 * 8)
+
+    Stream.into(stream, output)
+    |> Stream.run()
+  end
+
+  @impl true
+  def copy(%DavFile{fs_path: fs_path, path: dav_path}, dest) do
+    root_path = String.trim_leading(fs_path, dav_path) <> "/"
+    dest_fs_path = "#{root_path}#{if String.starts_with?(dest, "/"), do: dest, else: "/" <> dest}"
+
+    with {:ok, _} <- File.copy(fs_path, dest_fs_path) do
+      :ok
+    end
+  end
+
+  @impl true
+  def delete(%DavFile{fs_path: fs_path, stat: %{type: :regular}}) do
+    File.rm(fs_path)
+  end
+
+  def delete(%DavFile{fs_path: fs_path, stat: %{type: :directory}}) do
+    with {:ok, _deleted} <- File.rm_rf(fs_path) do
+      :ok
+    end
+  end
+
+  @impl true
+  def move_recursive(%DavFile{fs_path: fs_path, path: dav_path}, dest) do
+    root_path = String.trim_leading(fs_path, dav_path) <> "/"
+    dest_fs_path = "#{root_path}#{if String.starts_with?(dest, "/"), do: dest, else: "/" <> dest}"
+
+    File.rename(fs_path, dest_fs_path)
+  end
 end
 
 defmodule ExDav.FileSystemProvider.IOHelpers do
@@ -186,7 +230,7 @@ defmodule ExDav.FileSystemProvider.IOHelpers do
   def stream!(path, offset, length, chunk_size \\ @chunk_size) do
     Stream.resource(
       fn ->
-        io = File.open!(path)
+        io = File.open!(path, [:read, :binary, :raw])
         :file.position(io, {:bof, offset})
         # IO.inspect(io, label: "io")
         {0, io}

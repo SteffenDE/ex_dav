@@ -12,9 +12,9 @@ defmodule ExDav.TestProvider do
   def read_only(), do: true
 
   @impl true
-  def resolve(conn, _opts) do
-    case conn.path_info do
-      ["my", "existing", "file"] -> %ExDav.TestFile{}
+  def resolve(path, _opts) do
+    case path do
+      "/my/existing/file" -> %ExDav.TestFile{}
       _ -> nil
     end
   end
